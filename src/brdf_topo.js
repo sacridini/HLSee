@@ -20,39 +20,35 @@ var degree2radian = 0.01745;
 //BRDF correction
 //Source: https://doi.org/10.3390/rs11070831
 function apply_brdf_landsat(image){
-    var date = image.date();
-    var footprint = ee.List(image.geometry().bounds().bounds().coordinates().get(0));
-    var angles =  get_sun_angles(date, footprint);
-    var sunAz = angles[0];
-    var sunZen = angles[1];
+  var date = image.date();
+  var footprint = ee.List(image.geometry().bounds().bounds().coordinates().get(0));
+  var angles =  get_sun_angles(date, footprint);
+  var sunAz = angles[0];
+  var sunZen = angles[1];
+  var viewAz = azimuth(footprint);
+  var viewZen = zenith(footprint);
+  var kval = _kvol(sunAz, sunZen, viewAz, viewZen);
+  var kvol = kval[0];
+  var kvol0 = kval[1];
+  var result = _apply_landsat(image, kvol.multiply(PI), kvol0.multiply(PI));
   
-    var viewAz = azimuth(footprint);
-    var viewZen = zenith(footprint);
-  
-    var kval = _kvol(sunAz, sunZen, viewAz, viewZen);
-    var kvol = kval[0];
-    var kvol0 = kval[1];
-    var result = _apply_landsat(image, kvol.multiply(PI), kvol0.multiply(PI));
-  
-    return result;
+  return result;
 }
 
 function apply_brdf_sentinel(image){
-    var date = image.date();
-    var footprint = ee.List(image.geometry().bounds().bounds().coordinates().get(0));
-    var angles =  get_sun_angles(date, footprint);
-    var sunAz = angles[0];
-    var sunZen = angles[1];
+  var date = image.date();
+  var footprint = ee.List(image.geometry().bounds().bounds().coordinates().get(0));
+  var angles =  get_sun_angles(date, footprint);
+  var sunAz = angles[0];
+  var sunZen = angles[1];
+  var viewAz = azimuth(footprint);
+  var viewZen = zenith(footprint);
+  var kval = _kvol(sunAz, sunZen, viewAz, viewZen);
+  var kvol = kval[0];
+  var kvol0 = kval[1];
+  var result = _apply_sentinel(image, kvol.multiply(PI), kvol0.multiply(PI));
   
-    var viewAz = azimuth(footprint);
-    var viewZen = zenith(footprint);
-  
-    var kval = _kvol(sunAz, sunZen, viewAz, viewZen);
-    var kvol = kval[0];
-    var kvol0 = kval[1];
-    var result = _apply_sentinel(image, kvol.multiply(PI), kvol0.multiply(PI));
-  
-    return result;
+  return result;
 }
 
 function get_sun_angles(date, footprint){
@@ -121,58 +117,58 @@ function get_sun_angles(date, footprint){
 }
 
 function azimuth(footprint){
-    function x(point){return ee.Number(ee.List(point).get(0))}
-    function  y(point){return ee.Number(ee.List(point).get(1))}
+  function x(point){return ee.Number(ee.List(point).get(0))}
+  function  y(point){return ee.Number(ee.List(point).get(1))}
     
-    var upperCenter = line_from_coords(footprint, UPPER_LEFT, UPPER_RIGHT).centroid().coordinates();
-    var lowerCenter = line_from_coords(footprint, LOWER_LEFT, LOWER_RIGHT).centroid().coordinates();
-    var slope = ((y(lowerCenter)).subtract(y(upperCenter))).divide((x(lowerCenter)).subtract(x(upperCenter)));
-    var slopePerp = ee.Number(-1).divide(slope);
-    var azimuthLeft = ee.Image(PI.divide(2).subtract((slopePerp).atan()));
-    return azimuthLeft.rename(['viewAz']);
+  var upperCenter = line_from_coords(footprint, UPPER_LEFT, UPPER_RIGHT).centroid().coordinates();
+  var lowerCenter = line_from_coords(footprint, LOWER_LEFT, LOWER_RIGHT).centroid().coordinates();
+  var slope = ((y(lowerCenter)).subtract(y(upperCenter))).divide((x(lowerCenter)).subtract(x(upperCenter)));
+  var slopePerp = ee.Number(-1).divide(slope);
+  var azimuthLeft = ee.Image(PI.divide(2).subtract((slopePerp).atan()));
+  return azimuthLeft.rename(['viewAz']);
 }
   
 function zenith(footprint){
-    var leftLine = line_from_coords(footprint, UPPER_LEFT, LOWER_LEFT);
-    var rightLine = line_from_coords(footprint, UPPER_RIGHT, LOWER_RIGHT);
-    var leftDistance = ee.FeatureCollection(leftLine).distance(MAX_DISTANCE);
-    var rightDistance = ee.FeatureCollection(rightLine).distance(MAX_DISTANCE);
-    var viewZenith = rightDistance.multiply(ee.Number(MAX_SATELLITE_ZENITH * 2)) 
-          .divide(rightDistance.add(leftDistance)) 
-          .subtract(ee.Number(MAX_SATELLITE_ZENITH)) 
-          .clip(ee.Geometry.Polygon(footprint)) 
-          .rename(['viewZen']);
-    return viewZenith.multiply(PI.divide(180));
+  var leftLine = line_from_coords(footprint, UPPER_LEFT, LOWER_LEFT);
+  var rightLine = line_from_coords(footprint, UPPER_RIGHT, LOWER_RIGHT);
+  var leftDistance = ee.FeatureCollection(leftLine).distance(MAX_DISTANCE);
+  var rightDistance = ee.FeatureCollection(rightLine).distance(MAX_DISTANCE);
+  var viewZenith = rightDistance.multiply(ee.Number(MAX_SATELLITE_ZENITH * 2)) 
+        .divide(rightDistance.add(leftDistance)) 
+        .subtract(ee.Number(MAX_SATELLITE_ZENITH)) 
+        .clip(ee.Geometry.Polygon(footprint)) 
+        .rename(['viewZen']);
+  return viewZenith.multiply(PI.divide(180));
 }
 
 function _apply_sentinel(image, kvol, kvol0){
-      var f_iso = 0;
-      var f_geo = 0;
-      var f_vol = 0;
-			var blue = _correct_band(image, 'blue', kvol, kvol0, f_iso=0.0774, f_geo=0.0079, f_vol=0.0372);
-			var green = _correct_band(image, 'green', kvol, kvol0, f_iso=0.1306, f_geo=0.0178, f_vol=0.0580);
-			var red = _correct_band(image, 'red', kvol, kvol0, f_iso=0.1690, f_geo=0.0227, f_vol=0.0574);
-			var re1 = _correct_band(image, 're1', kvol, kvol0, f_iso=0.2085, f_geo=0.0256, f_vol=0.0845);
-			var re2 = _correct_band(image, 're2', kvol, kvol0, f_iso=0.2316, f_geo=0.0273, f_vol=0.1003);
-			var re3 = _correct_band(image, 're3', kvol, kvol0, f_iso=0.2599, f_geo=0.0294, f_vol=0.1197);
-      var nir = _correct_band(image, 'nir', kvol, kvol0, f_iso=0.3093, f_geo=0.0330, f_vol=0.1535);
-      var re4 = _correct_band(image, 're4', kvol, kvol0, f_iso=0.2907, f_geo=0.0410, f_vol=0.1611);
-      var swir1 = _correct_band(image, 'swir1', kvol, kvol0, f_iso=0.3430, f_geo=0.0453, f_vol=0.1154);   
-      var swir2 = _correct_band(image, 'swir2', kvol, kvol0, f_iso=0.2658, f_geo=0.0387, f_vol=0.0639);
-			return image.select([]).addBands([blue, green, red, nir,re1,re2,re3,nir,re4,swir1, swir2]);
+  var f_iso = 0;
+  var f_geo = 0;
+  var f_vol = 0;
+	var blue = _correct_band(image, 'blue', kvol, kvol0, f_iso=0.0774, f_geo=0.0079, f_vol=0.0372);
+	var green = _correct_band(image, 'green', kvol, kvol0, f_iso=0.1306, f_geo=0.0178, f_vol=0.0580);
+	var red = _correct_band(image, 'red', kvol, kvol0, f_iso=0.1690, f_geo=0.0227, f_vol=0.0574);
+	var re1 = _correct_band(image, 're1', kvol, kvol0, f_iso=0.2085, f_geo=0.0256, f_vol=0.0845);
+	var re2 = _correct_band(image, 're2', kvol, kvol0, f_iso=0.2316, f_geo=0.0273, f_vol=0.1003);
+	var re3 = _correct_band(image, 're3', kvol, kvol0, f_iso=0.2599, f_geo=0.0294, f_vol=0.1197);
+  var nir = _correct_band(image, 'nir', kvol, kvol0, f_iso=0.3093, f_geo=0.0330, f_vol=0.1535);
+  var re4 = _correct_band(image, 're4', kvol, kvol0, f_iso=0.2907, f_geo=0.0410, f_vol=0.1611);
+  var swir1 = _correct_band(image, 'swir1', kvol, kvol0, f_iso=0.3430, f_geo=0.0453, f_vol=0.1154);   
+  var swir2 = _correct_band(image, 'swir2', kvol, kvol0, f_iso=0.2658, f_geo=0.0387, f_vol=0.0639);
+	return image.select([]).addBands([blue, green, red, nir,re1,re2,re3,nir,re4,swir1, swir2]);
 }
 
 function _apply_landsat(image, kvol, kvol0){
-      var f_iso = 0;
-      var f_geo = 0;
-      var f_vol = 0;
-			var blue = _correct_band(image, 'blue', kvol, kvol0, f_iso=0.0774, f_geo=0.0079, f_vol=0.0372);
-			var green = _correct_band(image, 'green', kvol, kvol0, f_iso=0.1306, f_geo=0.0178, f_vol=0.0580);
-			var red = _correct_band(image, 'red', kvol, kvol0, f_iso=0.1690, f_geo=0.0227, f_vol=0.0574);
-      var nir = _correct_band(image, 'nir', kvol, kvol0, f_iso=0.3093, f_geo=0.0330, f_vol=0.1535);
-      var swir1 = _correct_band(image, 'swir1', kvol, kvol0, f_iso=0.3430, f_geo=0.0453, f_vol=0.1154);   
-      var swir2 = _correct_band(image, 'swir2', kvol, kvol0, f_iso=0.2658, f_geo=0.0387, f_vol=0.0639);
-			return image.select([]).addBands([blue, green, red, nir, swir1, swir2]);
+  var f_iso = 0;
+  var f_geo = 0;
+  var f_vol = 0;
+	var blue = _correct_band(image, 'blue', kvol, kvol0, f_iso=0.0774, f_geo=0.0079, f_vol=0.0372);
+	var green = _correct_band(image, 'green', kvol, kvol0, f_iso=0.1306, f_geo=0.0178, f_vol=0.0580);
+	var red = _correct_band(image, 'red', kvol, kvol0, f_iso=0.1690, f_geo=0.0227, f_vol=0.0574);
+  var nir = _correct_band(image, 'nir', kvol, kvol0, f_iso=0.3093, f_geo=0.0330, f_vol=0.1535);
+  var swir1 = _correct_band(image, 'swir1', kvol, kvol0, f_iso=0.3430, f_geo=0.0453, f_vol=0.1154);   
+  var swir2 = _correct_band(image, 'swir2', kvol, kvol0, f_iso=0.2658, f_geo=0.0387, f_vol=0.0639);
+	return image.select([]).addBands([blue, green, red, nir, swir1, swir2]);
 }
 
 function _correct_band(image, band_name, kvol, kvol0, f_iso, f_geo, f_vol){
@@ -223,9 +219,9 @@ function _kvol(sunAz, sunZen, viewAz, viewZen){
 
 
 function line_from_coords(coordinates, fromIndex, toIndex){
-    return ee.Geometry.LineString(ee.List([
-      coordinates.get(fromIndex),
-      coordinates.get(toIndex)]));
+  return ee.Geometry.LineString(ee.List([
+    coordinates.get(fromIndex),
+    coordinates.get(toIndex)]));
 }
 
 function where(condition, trueValue, falseValue){
@@ -235,11 +231,11 @@ function where(condition, trueValue, falseValue){
 }
 
 function invert_mask(mask){
-    return mask.multiply(-1).add(1);
+  return mask.multiply(-1).add(1);
 }
 
 function value(list,index){
-    return ee.Number(list.get(index));
+  return ee.Number(list.get(index));
 }
 
 
@@ -279,62 +275,60 @@ function illumination_condition_landsat(img){
 }
   
 function illumination_correction(img){
-    var props = img.toDictionary();
-    var st = img.get('system:time_start');
-    
-    var img_plus_ic = img;
-    var mask1 = img_plus_ic.select('nir').gt(-0.1);
-    var mask2 = img_plus_ic.select('slope').gte(5)
-                            .and(img_plus_ic.select('IC').gte(0))
-                            .and(img_plus_ic.select('nir').gt(-0.1));
-    var img_plus_ic_mask2 = ee.Image(img_plus_ic.updateMask(mask2));
-    
-    // Specify Bands to topographically correct  
-    var bandList = ['blue','green','red','nir','swir1','swir2']; 
-    var compositeBands = img.bandNames();
-    var nonCorrectBands = img.select(compositeBands.removeAll(bandList));
-    
-    var geom = ee.Geometry(img.get('system:footprint')).bounds().buffer(10000);
-    
-    function apply_SCSccorr(band){
-      var method = 'SCSc';
-      var out = img_plus_ic_mask2.select('IC', band).reduceRegion({
-      reducer: ee.Reducer.linearFit(), // Compute coefficients: a(slope), b(offset), c(b/a)
-      geometry: ee.Geometry(img.geometry().buffer(-100)), // trim off the outer edges of the image for linear relationship 
-      scale: 30,
-      maxPixels: 1000000000
-      });  
-
-   if (out === null || out === undefined ){
-       return img_plus_ic_mask2.select(band);
-       }
+  var props = img.toDictionary();
+  var st = img.get('system:time_start');
   
-  else{
-      var out_a = ee.Number(out.get('scale'));
-      var out_b = ee.Number(out.get('offset'));
-      var out_c = out_b.divide(out_a);
-      // Apply the SCSc correction
-      var SCSc_output = img_plus_ic_mask2.expression(
-        "((image * (cosB * cosZ + cvalue)) / (ic + cvalue))", {
-        'image': img_plus_ic_mask2.select(band),
-        'ic': img_plus_ic_mask2.select('IC'),
-        'cosB': img_plus_ic_mask2.select('cosS'),
-        'cosZ': img_plus_ic_mask2.select('cosZ'),
-        'cvalue': out_c
-      });
-      
-      return SCSc_output;
-    }
-      
-    }
+  var img_plus_ic = img;
+  var mask1 = img_plus_ic.select('nir').gt(-0.1);
+  var mask2 = img_plus_ic.select('slope').gte(5)
+                          .and(img_plus_ic.select('IC').gte(0))
+                          .and(img_plus_ic.select('nir').gt(-0.1));
+  var img_plus_ic_mask2 = ee.Image(img_plus_ic.updateMask(mask2));
+  
+  // Specify Bands to topographically correct  
+  var bandList = ['blue','green','red','nir','swir1','swir2']; 
+  var compositeBands = img.bandNames();
+  var nonCorrectBands = img.select(compositeBands.removeAll(bandList));
+  
+  var geom = ee.Geometry(img.get('system:footprint')).bounds().buffer(10000);
+  
+  function apply_SCSccorr(band){
+    var method = 'SCSc';
+    var out = img_plus_ic_mask2.select('IC', band).reduceRegion({
+    reducer: ee.Reducer.linearFit(), // Compute coefficients: a(slope), b(offset), c(b/a)
+    geometry: ee.Geometry(img.geometry().buffer(-100)), // trim off the outer edges of the image for linear relationship 
+    scale: 30,
+    maxPixels: 1000000000
+    });  
+   if (out === null || out === undefined ){
+     return img_plus_ic_mask2.select(band);
+   } else {
+    var out_a = ee.Number(out.get('scale'));
+    var out_b = ee.Number(out.get('offset'));
+    var out_c = out_b.divide(out_a);
+    // Apply the SCSc correction
+    var SCSc_output = img_plus_ic_mask2.expression(
+      "((image * (cosB * cosZ + cvalue)) / (ic + cvalue))", {
+      'image': img_plus_ic_mask2.select(band),
+      'ic': img_plus_ic_mask2.select('IC'),
+      'cosB': img_plus_ic_mask2.select('cosS'),
+      'cosZ': img_plus_ic_mask2.select('cosZ'),
+      'cvalue': out_c
+    });
     
-    var img_SCSccorr = ee.Image(bandList.map(apply_SCSccorr)).addBands(img_plus_ic.select('IC'));
-    var bandList_IC = ee.List([bandList, 'IC']).flatten();
-    img_SCSccorr = img_SCSccorr.unmask(img_plus_ic.select(bandList_IC)).select(bandList);
+    return SCSc_output;
+     
+   }
+      
+  }
     
-    return img_SCSccorr.addBands(nonCorrectBands)
-      .setMulti(props)
-      .set('system:time_start',st);
+  var img_SCSccorr = ee.Image(bandList.map(apply_SCSccorr)).addBands(img_plus_ic.select('IC'));
+  var bandList_IC = ee.List([bandList, 'IC']).flatten();
+  img_SCSccorr = img_SCSccorr.unmask(img_plus_ic.select(bandList_IC)).select(bandList);
+    
+  return img_SCSccorr.addBands(nonCorrectBands)
+    .setMulti(props)
+    .set('system:time_start',st);
 }
   
 function illumination_condition_sentinel(img){
