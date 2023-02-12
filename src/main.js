@@ -1,7 +1,10 @@
 var csmask = require('users/eduardolacerdageo/default:Embrapa/csmask');
 var brdf_topo = require('users/eduardolacerdageo/default:Embrapa/brdf_topo'); 
+var reproj = require('users/eduardolacerdageo/default:Embrapa/reproject'); 
+var reg = require('users/eduardolacerdageo/default:Embrapa/coregistration'); 
 
 var roi = ee.Geometry.Point([-43.07224253472556, -22.90853626286694]);
+var rj = ee.FeatureCollection("users/eduardolacerdageo/limites/mun_rj");
 var start_date = '2019-01-01';
 var end_date   = '2019-12-31';
 var names_band_in_landsat7 = ['SR_B1', 'SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B7', 'QA_PIXEL'];
@@ -11,6 +14,12 @@ var names_band_out_landsat8 = ['blue','green','red','nir', 'swir1', 'swir2', 'qa
 var names_band_in_sentinel = ['B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B11', 'B12', 'QA60'];
 var names_band_out_sentinel = ['blue','green','red','re1','re2','re3','nir','re4', 'swir1', 'swir2', 'qa_band'];
 
+// Utils: Clip function
+function clip_collection(image) {
+  var result = image.clip(rj);
+  return(result);
+}
+
 // Load and select Landsat 7 Level 2, Collection 2, Tier 1 images
 var ls7_c = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2')
                 .filterBounds(roi)
@@ -18,6 +27,7 @@ var ls7_c = ee.ImageCollection('LANDSAT/LE07/C02/T1_L2')
                 .select(names_band_in_landsat7, names_band_out_landsat7)
                 .map(function (image) { return csmask.cs_mask_landsat(image, image.select("qa_band")); })
                 .map(brdf_topo.apply_brdf_landsat)
+                .map(clip_collection);
                 // .map(brdf_topo.illumination_condition_landsat);
 
 // Load and select Landsat 8 Level 2, Collection 2, Tier 1 images
@@ -27,6 +37,7 @@ var ls8_c = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
                 .select(names_band_in_landsat8, names_band_out_landsat8)
                 .map(function (image) { return csmask.cs_mask_landsat(image, image.select("qa_band")); })
                 .map(brdf_topo.apply_brdf_landsat)
+                .map(clip_collection);
                 // .map(brdf_topo.illumination_condition_landsat);
 
 
@@ -40,7 +51,7 @@ var s2_c = ee.ImageCollection('COPERNICUS/S2_SR')
 // Load and select Sentinel-2: Cloud Probability images
 var s2_cloud_c = ee.ImageCollection('COPERNICUS/S2_CLOUD_PROBABILITY')
                 .filterBounds(roi)
-                .filterDate(start_date, end_date)
+                .filterDate(start_date, end_date);
 
 
 // Join S2 SR with cloud probability dataset to add cloud mask.
@@ -51,16 +62,28 @@ var s2_and_s2_cloud_c = ee.Join.saveFirst('cloud_mask').apply({
       ee.Filter.equals({leftField: 'system:index', rightField: 'system:index'})
 });
 
+// Cloud and Shadow masking
 var s2_cloud_masked_c = ee.ImageCollection(s2_and_s2_cloud_c).map(csmask.cloudmask_sr_sentinel);
 var s2_cs_masked_c = csmask.simple_TDOM2(s2_cloud_masked_c);
 var s2_cs_brdf_c = s2_cs_masked_c.map(brdf_topo.apply_brdf_sentinel);
+var s2_cs_brdf_clip_c = s2_cs_brdf_c.map(clip_collection);
+
+// Reprojection
+/* var ls8_image = ee.Image('LANDSAT/LC08/C02/T1_L2/LC08_174036_20181107')
+            .select(names_band_in_landsat8,names_band_out_landsat8);
+var s2_cs_brdf_reproj_c = s2_cs_brdf_c.map(function (image) { return reproj.reproject_sen2ls(image, ls8_image); }); */
+
+// Co-registration
+// var ls8_c_reg = ls8_c.map(reg.co_registration_landsat);
+
 // var s2_cs_topo_brdf_c = s2_cs_brdf_c.map(brdf_topo.illumination_condition_sentinel);
 // var s2_corr_c = s2_cs_topo_brdf_c.map(brdf_topo.illumination_correction);
-// var ls8_cs_brdf_c = ls8_c.map(brdf_topo.illumination_condition_landsat)
+// var ls8_cs_brdf_c = ls8_c.map(brdf_topo.illumination_condition_landsat);
 
+print(s2_cs_brdf_clip_c);
 
-var s2_list = ee.ImageCollection(s2_cs_brdf_c).toList(999);
-var s2_image = ee.Image(ee.List(s2_list).get(0));
+var s2_list = ee.ImageCollection(s2_cs_brdf_clip_c).toList(999);
+var s2_image = ee.Image(ee.List(s2_list).get(1));
 Map.centerObject(roi, 10);
 var rgbVis = {min: 0, max: 3000, bands: ['red', 'green', 'blue']};
 Map.addLayer(s2_image, rgbVis, 'S2 SR masked at 65%', true);
