@@ -1,7 +1,8 @@
 var csmask = require('users/eduardolacerdageo/default:Embrapa/csmask');
 var brdf_topo = require('users/eduardolacerdageo/default:Embrapa/brdf_topo'); 
 var reproj = require('users/eduardolacerdageo/default:Embrapa/reproject'); 
-var reg = require('users/eduardolacerdageo/default:Embrapa/coregistration'); 
+var reg = require('users/eduardolacerdageo/default:Embrapa/coregistration');
+var ba = require('users/eduardolacerdageo/default:Embrapa/band_adjustment'); 
 
 var roi = ee.Geometry.Point([-43.07224253472556, -22.90853626286694]);
 var rj = ee.FeatureCollection("users/eduardolacerdageo/limites/mun_rj");
@@ -69,9 +70,8 @@ var s2_cs_brdf_c = s2_cs_masked_c.map(brdf_topo.apply_brdf_sentinel);
 var s2_cs_brdf_clip_c = s2_cs_brdf_c.map(clip_collection);
 
 // Reprojection
-/* var ls8_image = ee.Image('LANDSAT/LC08/C02/T1_L2/LC08_174036_20181107')
-            .select(names_band_in_landsat8,names_band_out_landsat8);
-var s2_cs_brdf_reproj_c = s2_cs_brdf_c.map(function (image) { return reproj.reproject_sen2ls(image, ls8_image); }); */
+var ls8_image = ee.Image(ls8_c.first());
+var s2_cs_brdf_reproj_c = s2_cs_brdf_clip_c.map(function (image) { return reproj.reproject_sen2ls(image, ls8_image); });
 
 // Co-registration
 // var ls8_c_reg = ls8_c.map(reg.co_registration_landsat);
@@ -80,9 +80,12 @@ var s2_cs_brdf_reproj_c = s2_cs_brdf_c.map(function (image) { return reproj.repr
 // var s2_corr_c = s2_cs_topo_brdf_c.map(brdf_topo.illumination_correction);
 // var ls8_cs_brdf_c = ls8_c.map(brdf_topo.illumination_condition_landsat);
 
-print(s2_cs_brdf_clip_c);
+// Band Adjustment
+var ls8_ba = ls8_c.map(ba.band_adjustment_landsat);
 
-var s2_list = ee.ImageCollection(s2_cs_brdf_clip_c).toList(999);
+print(s2_cs_brdf_reproj_c);
+
+var s2_list = ee.ImageCollection(s2_cs_brdf_reproj_c).toList(999);
 var s2_image = ee.Image(ee.List(s2_list).get(1));
 Map.centerObject(roi, 10);
 var rgbVis = {min: 0, max: 3000, bands: ['red', 'green', 'blue']};
